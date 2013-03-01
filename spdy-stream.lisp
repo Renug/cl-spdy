@@ -1,2 +1,0 @@
-(defclass spdy-stream ()
-  ())
