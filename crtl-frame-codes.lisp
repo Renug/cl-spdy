@@ -1,6 +1,6 @@
 ;(use-package 'usocket)
 ;;====================================================================================================
-(defvar *control-frame-type-code* '((SYN_STREAM . 1)
+(defparameter *control-frame-type-code* '((SYN_STREAM . 1)
                                     (SYN_REPLY . 2)
                                     (RST_STREAM . 3)
                                     (SETTINGS . 4)
@@ -11,7 +11,7 @@
                                     (WINDOW_UPDATE . 9)
                                     (CREDENTIAL . #b0000000000001011)))
 
-(defvar *rst-stream-status-code* '((PROTOCOL_ERROR . 1)
+(defparameter *rst-stream-status-code* '((PROTOCOL_ERROR . 1)
                                    (INVALID_STREAM . 2)
                                    (REFUSED_STREAM . 3)
                                    (UNSUPPORTED_VERSION . 4)
@@ -23,16 +23,16 @@
                                    (INVALID_CREDENTIALS . 10)
                                    (FRAME_TOO_LARGE . 11)))
 
-(defvar *goway-status-code* '((OK . 0)
+(defparameter *goway-status-code* '((OK . 0)
                               (PROTOCOL_ERROR . 1)
                               (INTERNAL_ERROR . 11)))
 
-(defvar *setting-flag-code* '((FLAG_SETTINGS_CLEAR_SETTINGS . #x1)))
+(defparameter *setting-flag-code* '((FLAG_SETTINGS_CLEAR_SETTINGS . #x1)))
 
-(defvar *setting-id-flag-code* '((FLAG_SETTINGS_PERSIST_VALUE . #x1)
+(defparameter *setting-id-flag-code* '((FLAG_SETTINGS_PERSIST_VALUE . #x1)
                                  (FLAG_SETTINGS_PERSISTED . #x2)))
 
-(defvar *setting-id-code* '((SETTINGS_UPLOAD_BANDWIDTH . 1)
+(defparameter *setting-id-code* '((SETTINGS_UPLOAD_BANDWIDTH . 1)
                             (SETTINGS_DOWNLOAD_BANDWIDTH . 2)
                             (SETTINGS_ROUND_TRIP_TIME . 3)
                             (SETTINGS_MAX_CONCURRENT_STREAMS . 4)
@@ -41,8 +41,10 @@
                             (SETTINGS_INITIAL_WINDOW_SIZE . 7)
                             (SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE . 8)))
 
-(defvar *control-frame-flag-code* '((FLAG_FIN . #x01)
-                                    (FLAG_UNIDIRECTIONAL . #x02)))
+(defparameter *control-frame-flag-code* '((FLAG_FIN . #x01)
+                                          (FLAG_SETTINGS_CLEAR_SETTINGS . #x1)
+                                          (FLAG_UNIDIRECTIONAL . #x02)
+                                          (NONE . #x0)))
 ;;====================================================================================================
 (defun append-vector (vector1 vector2)
   (concatenate 'vector vector1 vector2))
@@ -58,6 +60,9 @@
 (defun control-frame-flag-symbol-to-code (symbol)
   (symbol-to-code *control-frame-flag-code* symbol))
 
+(defun goaway-frame-flag-to-code (symbol)
+  (symbol-to-code *goway-status-code* symbol))
+
 (defun number-to-vector (len value)
   (reverse (loop with array = (make-array len)
                  for i from (- len 1) downto 0 
@@ -72,10 +77,10 @@
   nil)
 ;;====================================================================================================
 (defclass control-frame ()
-  ((version :initform 2
+  ((version :initform 3
             :initarg :version
             :accessor version)
-   (flags :initform 0
+   (flags :initform 'FLAG_FIN
           :initarg :flags
           :accessor flags)
    (frame-type :initform nil
@@ -88,7 +93,7 @@
                        :initarg :control-frame-data
                        :accessor control-frame-data)))
 
-(defun mk-control-frame (version flags frame-type length-in-byte &key (control-frame-data nil)) 
+(defun mk-control-frame (&key (flags 'FLAG_FIN) (frame-type ) length-in-byte (version 3) (control-frame-data nil))
   (make-instance 'control-frame
                  :version version
                  :flags flags
@@ -101,7 +106,7 @@
     (let ((value (logior (ash 1 63) 
                          (ash (ldb (byte 15 0) version) 48)
                          (ash (ldb (byte 16 0) (control-frame-type-to-code frame-type)) 32)
-                         (ash (ldb (byte 8 0) flags) 24)
+                         (ash (ldb (byte 8 0) (control-frame-flag-symbol-to-code flags)) 24)
                          (ldb (byte 24 0) length-in-byte))))
       (append-vector (number-to-vector 8 value)
                      (frame-to-list control-frame-data)))))
@@ -142,6 +147,16 @@
                  :stream-id stream-id
                  :name-value-pair name-value-pair))
 
+
+
+(defun mk-header-control-frame (stream-id &key (flags 'FLAG_FIN)(name-value-pair nil))
+  (let ((frame-data (mk-header-control-frame-data stream-id
+                                                  :name-value-pair name-value-pair)))
+    (mk-control-frame :flags (control-frame-flag-symbol-to-code flags)
+                      :frame-type 'HEADERS
+                      :control-frame-data frame-data
+                      :length-in-byte (length (frame-to-list frame-data)))))
+
 (defmethod frame-to-list ((frame header-control-frame-data))
   (with-slots (stream-id  name-value-pair) frame
     (let ((value (logior (ash 0 63)
@@ -164,6 +179,15 @@
                  :stream-id stream-id
                  :status-code status-code))
 
+(defun mk-rst-stream-control-frame (stream-id status-code)
+  (mk-control-frame :flags 0
+                    :length-in-byte 8
+                    :frame-type 'RST_STREAM
+                    :control-frame-data (mk-rst-stream-control-frame-data
+                                         stream-id
+                                         :status-code status-code)))
+
+
 (defmethod frame-to-list ((frame rst-stream-control-frame-data))
   (with-slots (stream-id  status-code) frame
     (let ((value (logior (ash 0 63)
@@ -183,6 +207,15 @@
   (make-instance 'syn-reply-control-frame-data 
                  :stream-id stream-id 
                  :name-value-pair name-value-pair))
+
+(defun mk-syn-reply-control-frame (stream-id &key (flags 'FLAG_FIN) (name-value-pair nil))
+  (let ((frame-data (mk-syn-reply-control-frame-data
+                     :stream-id stream-id
+                     :name-value-pair name-value-pair)))
+    (mk-control-frame :flags (control-frame-flag-symbol-to-code flags)
+                      :frame-type 'SYN_REPLY
+                      :control-frame-data frame-data
+                      :length-in-byte (length (frame-to-list frame-data)))))
 
 (defmethod frame-to-list ((frame syn-reply-control-frame-data))
   (with-slots (stream-id name-value-pair) frame
@@ -222,6 +255,22 @@
                  :name-value-pair name-value-pair
                  :slot slot))
 
+
+(defun mk-syn-stream-control-frame (stream-id priority &key 
+                                              (flags 'FLAG_FIN)
+                                              (associated-to-stream-id 0) 
+                                              (slot 0) 
+                                              (name-value-pair nil))
+  (let ((frame-data (mk-syn-stream-control-frame-data stream-id 
+                                                      priority
+                                                      :associated-to-stream-id associated-to-stream-id
+                                                      :slot slot
+                                                      :name-value-pair name-value-pair)))
+    (mk-control-frame :flags flags
+                      :frame-type 'SYN_STREAM
+                      :control-frame-data frame-data
+                      :length-in-byte (length (frame-to-list frame-data)))))
+
 (defmethod frame-to-list ((frame syn-stream-control-frame-data))
   (with-slots (stream-id priority associated-to-stream-id name-value-pair slot) frame
     (let ((value (logior (ldb (byte 32 0) (length name-value-pair))
@@ -247,9 +296,17 @@
                  :last-good-stream-id last-good-stream-id
                  :status-code status-code))
 
+(defun mk-goway-control-frame (last-good-stream-id &key (status-code 'OK))
+  (mk-control-frame
+   :flags 'NONE
+   :frame-type 'GOAWAY
+   :length-in-byte 8
+   :control-frame-data (mk-goway-control-frame-data last-good-stream-id 
+                                                    :status-code status-code)))
+
 (defmethod frame-to-list ((frame goway-control-frame-data))
   (with-slots (last-good-stream-id status-code) frame
-    (let ((value (logior (ldb (byte 32 0) (symbol-to-code *goway-status-code* status-code))
+    (let ((value (logior (ldb (byte 32 0) (goaway-frame-flag-to-code status-code))
                          (ash (ldb (byte 31 0) last-good-stream-id) 32)
                          (ash 0 63))))
       (number-to-vector 8 value))))
@@ -262,6 +319,12 @@
 (defun mk-ping-control-frame-data (id)
   (make-instance 'ping-control-frame-data 
                  :id id))
+
+(defun mk-ping-control-frame (id)
+  (mk-control-frame :flags 'NONE
+                    :length-in-byte 4
+                    :frame-type 'PING
+                    :control-frame-data (mk-ping-control-frame-data id)))
 
 (defmethod frame-to-list ((frame ping-control-frame-data))
   (number-to-vector 4 (id frame)))
@@ -278,6 +341,14 @@
   (make-instance 'window-update-control-frame-data 
                  :stream-id stream-id
                  :delta-window-size delta-window-size))
+
+(defun mk-window-update-control-frame (stream-id delta-window-size)
+  (mk-control-frame
+   :flags 'NONE
+   :length-in-byte 8
+   :frame-type 'WINDOW_UPDATE
+   :control-frame-data (mk-window-update-control-frame-data stream-id
+                                                            delta-window-size)))
 
 (defmethod frame-to-list ((frame window-update-control-frame-data))
   (with-slots (stream-id delta-window-size) frame
@@ -296,6 +367,14 @@
 (defun mk-setting-control-frame-data (id-value-pair)
   (make-instance 'setting-control-frame-data 
                  :id-value-pair id-value-pair))
+
+(defun mk-setting-control-frame (id-value-pair &key (flags 'FLAG_SETTINGS_CLEAR_SETTINGS))
+  (let ((frame-data (mk-setting-control-frame-data id-value-pair)))
+    (mk-control-frame
+     :flags flags
+     :length-in-byte (length (frame-to-list frame-data))
+     :frame-type 'SETTINGS
+     :control-frame-data frame-data)))
 
 (defun comprised-flag-and-id (flag id)
   (logior (ash (ldb (byte 8 0) flag) 24) 
@@ -327,6 +406,7 @@
                  :proof-length proof-length
                  :proof proof
                  :length-certificate-pair length-certificate-pair))
+
 
 (defmethod frame-to-list ((frame credential-control-frame-data))
   (with-slots (slots proof-length proof length-certificate-pair) frame

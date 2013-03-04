@@ -1,3 +1,4 @@
+(defparameter *stream-id-count* 0)
 
 (defclass spdy-stream ()
   ((stream-id :initarg :stream-id
