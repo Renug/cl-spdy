@@ -70,14 +70,15 @@
                  finally (return array))))
 ;;====================================================================================================
 
-(defgeneric frame-to-list (frame) 
+(defgeneric frame-serialization (frame) 
   (:documentation "convert a control frame to a list"))
 
-(defmethod frame-to-list (frame)
+(defmethod frame-serialization (frame)
   nil)
 ;;====================================================================================================
 (defclass control-frame ()
   ((version :initform 3
+            :type integer
             :initarg :version
             :accessor version)
    (flags :initform 'FLAG_FIN
@@ -101,15 +102,14 @@
                  :length-in-byte length-in-byte
                  :control-frame-data control-frame-data))
 
-(defmethod frame-to-list ((frame control-frame))
+(defmethod frame-serialization ((frame control-frame))
   (with-slots (version flags length-in-byte frame-type control-frame-data) frame
-    (let ((value (logior (ash 1 63) 
-                         (ash (ldb (byte 15 0) version) 48)
-                         (ash (ldb (byte 16 0) (control-frame-type-to-code frame-type)) 32)
-                         (ash (ldb (byte 8 0) (control-frame-flag-symbol-to-code flags)) 24)
-                         (ldb (byte 24 0) length-in-byte))))
+    (let ((value (serialization (cons length-in-byte 24)
+                                (cons (control-frame-flag-symbol-to-code flags) 8)
+                                (cons (control-frame-type-to-code frame-type) 16)
+                                (cons (logior (ash 1 15) (ldb (byte 15 0) version)) 16))))
       (append-vector (number-to-vector 8 value)
-                     (frame-to-list control-frame-data)))))
+                     (frame-serialization control-frame-data)))))
 ;;====================================================================================================
 
 (defun name-value-pair-to-list (nv-pair)
@@ -128,8 +128,8 @@
 (defun id-value-pairs-to-list (id-value-pair)
   (when id-value-pair
     (let* ((first-item (car id-value-pair))
-           (value (logior (ldb (byte 32 0) (cdr first-item))
-                          (ash (ldb (byte 32 0) (car first-item)) 32))))
+           (value (serialization (cons (cdr first-item) 32)
+                                 (cons (car first-item) 32))))
       (append-vector (number-to-vector 8 value)
                      (id-value-pairs-to-list (cdr id-value-pair))))))
 ;;====================================================================================================
@@ -155,13 +155,12 @@
     (mk-control-frame :flags (control-frame-flag-symbol-to-code flags)
                       :frame-type 'HEADERS
                       :control-frame-data frame-data
-                      :length-in-byte (length (frame-to-list frame-data)))))
+                      :length-in-byte (length (frame-serialization frame-data)))))
 
-(defmethod frame-to-list ((frame header-control-frame-data))
+(defmethod frame-serialization ((frame header-control-frame-data))
   (with-slots (stream-id  name-value-pair) frame
-    (let ((value (logior (ash 0 63)
-                         (ash (ldb (byte 31 0) stream-id) 32)
-                         (ldb (byte 32 0) (length name-value-pair)))))
+    (let ((value (serialization (cons (length name-value-pair) 32)
+                                (cons (ldb (byte 31 0) stream-id) 32))))
       (append-vector (number-to-vector 8 value)
                      (name-value-pair-to-list name-value-pair)))))
 
@@ -188,11 +187,11 @@
                                          :status-code status-code)))
 
 
-(defmethod frame-to-list ((frame rst-stream-control-frame-data))
+(defmethod frame-serialization ((frame rst-stream-control-frame-data))
   (with-slots (stream-id  status-code) frame
-    (let ((value (logior (ash 0 63)
-                         (ash (ldb (byte 31 0) stream-id) 32)
-                         (ldb (byte 32 0) status-code))))
+    (let ((value (serialization (cons status-code 32)
+                                (cons stream-id 32)
+                                (cons 0 1))))
       (number-to-vector 8 value))))
 ;;====================================================================================================
 (defclass syn-reply-control-frame-data ()
@@ -215,13 +214,12 @@
     (mk-control-frame :flags (control-frame-flag-symbol-to-code flags)
                       :frame-type 'SYN_REPLY
                       :control-frame-data frame-data
-                      :length-in-byte (length (frame-to-list frame-data)))))
+                      :length-in-byte (length (frame-serialization frame-data)))))
 
-(defmethod frame-to-list ((frame syn-reply-control-frame-data))
+(defmethod frame-serialization ((frame syn-reply-control-frame-data))
   (with-slots (stream-id name-value-pair) frame
-    (let ((value (logior (ash 0 63)
-                         (ash (ldb (byte 31 0) stream-id) 32)
-                         (ldb (byte 32 0) (length name-value-pair)))))
+    (let ((value (serialization (cons (length name-value-pair) 32)
+                                (cons (ldb (byte 31 0) stream-id) 32))))
       (append-vector (number-to-vector 8 value)
                      (name-value-pair-to-list name-value-pair)))))
 ;;====================================================================================================
@@ -269,17 +267,15 @@
     (mk-control-frame :flags flags
                       :frame-type 'SYN_STREAM
                       :control-frame-data frame-data
-                      :length-in-byte (length (frame-to-list frame-data)))))
+                      :length-in-byte (length (frame-serialization frame-data)))))
 
-(defmethod frame-to-list ((frame syn-stream-control-frame-data))
+(defmethod frame-serialization ((frame syn-stream-control-frame-data))
   (with-slots (stream-id priority associated-to-stream-id name-value-pair slot) frame
-    (let ((value (logior (ldb (byte 32 0) (length name-value-pair))
-                         (ash (ldb (byte 8 0) slot) 32)
-                         (ash (ldb (byte 8 0) (ash (ldb (byte 8 0) priority) 5)) 40)
-                         (ash (ldb (byte 31 0) associated-to-stream-id) 48)
-                         (ash (ldb (byte 1 0) 0) 79)
-                         (ash (ldb (byte 31 0) stream-id) 80)
-                         (ash (ldb (byte 1 0) 0) 111))))
+    (let ((value (serialization (cons (length name-value-pair) 32)
+                                (cons slot 8)
+                                (cons (ash (ldb (byte 8 0) priority) 5) 8)
+                                (cons (ldb (byte 31 0) associated-to-stream-id) 32)
+                                (cons (ldb (byte 31 0) stream-id) 32))))
       (append-vector (number-to-vector 14 value)
                      (name-value-pair-to-list name-value-pair)))))
 ;;====================================================================================================
@@ -304,11 +300,10 @@
    :control-frame-data (mk-goway-control-frame-data last-good-stream-id 
                                                     :status-code status-code)))
 
-(defmethod frame-to-list ((frame goway-control-frame-data))
+(defmethod frame-serialization ((frame goway-control-frame-data))
   (with-slots (last-good-stream-id status-code) frame
-    (let ((value (logior (ldb (byte 32 0) (goaway-frame-flag-to-code status-code))
-                         (ash (ldb (byte 31 0) last-good-stream-id) 32)
-                         (ash 0 63))))
+    (let ((value (serialization (cons (goaway-frame-flag-to-code status-code) 32)
+                                (cons (ldb (byte 31 0) last-good-stream-id) 32))))
       (number-to-vector 8 value))))
 ;;====================================================================================================
 (defclass ping-control-frame-data ()
@@ -326,7 +321,7 @@
                     :frame-type 'PING
                     :control-frame-data (mk-ping-control-frame-data id)))
 
-(defmethod frame-to-list ((frame ping-control-frame-data))
+(defmethod frame-serialization ((frame ping-control-frame-data))
   (number-to-vector 4 (id frame)))
 ;;====================================================================================================
 (defclass window-update-control-frame-data ()
@@ -350,12 +345,10 @@
    :control-frame-data (mk-window-update-control-frame-data stream-id
                                                             delta-window-size)))
 
-(defmethod frame-to-list ((frame window-update-control-frame-data))
+(defmethod frame-serialization ((frame window-update-control-frame-data))
   (with-slots (stream-id delta-window-size) frame
-    (let ((value (logior (ldb (byte 31 0) delta-window-size)
-                         (ash 0 31)
-                         (ash (ldb (byte 31 0) stream-id) 32)
-                         (ash 0 63))))
+    (let ((value (serialization (cons (ldb (byte 31 0) delta-window-size) 32)
+                                (cons (ldb (byte 31 0) stream-id) 32))))
       (number-to-vector 8 value))))
 ;;====================================================================================================      
 
@@ -372,7 +365,7 @@
   (let ((frame-data (mk-setting-control-frame-data id-value-pair)))
     (mk-control-frame
      :flags flags
-     :length-in-byte (length (frame-to-list frame-data))
+     :length-in-byte (length (frame-serialization frame-data))
      :frame-type 'SETTINGS
      :control-frame-data frame-data)))
 
@@ -380,7 +373,7 @@
   (logior (ash (ldb (byte 8 0) flag) 24) 
           (ldb (byte 24 0) id)))
 
-(defmethod frame-to-list ((frame setting-control-frame-data))
+(defmethod frame-serialization ((frame setting-control-frame-data))
   (with-slots (id-value-pair) frame
     (let ((length-of-id-value-pair (length id-value-pair)))
       (append-vector (number-to-vector 4 length-of-id-value-pair)
@@ -408,7 +401,7 @@
                  :length-certificate-pair length-certificate-pair))
 
 
-(defmethod frame-to-list ((frame credential-control-frame-data))
+(defmethod frame-serialization ((frame credential-control-frame-data))
   (with-slots (slots proof-length proof length-certificate-pair) frame
     (let ((value (logior (ldb (byte 32 0) proof)
                          (ash (ldb (byte 32 0) proof-length) 32)
