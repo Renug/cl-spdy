@@ -28,3 +28,10 @@
   (case symbol
     ('FLAG_FIN #x01)
     ('FLAG_COMPRESS #x02)))
+
+(defun mk-data-frame (&key stream-id length-in-byte data (flags 'FLAG_FIN))
+  (make-instance 'spdy-data-frame 
+                 :stream-id stream-id
+                 :length-in-byte length-in-byte
+                 :data data
+                 :flags flags))

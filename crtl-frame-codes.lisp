@@ -1,15 +1,15 @@
 ;(use-package 'usocket)
 ;;====================================================================================================
 (defparameter *control-frame-type-code* '((SYN_STREAM . 1)
-                                    (SYN_REPLY . 2)
-                                    (RST_STREAM . 3)
-                                    (SETTINGS . 4)
-                                    (NOOP . 5)
-                                    (PING . 6)
-                                    (GOAWAY . 7)
-                                    (HEADERS . 8)
-                                    (WINDOW_UPDATE . 9)
-                                    (CREDENTIAL . #b0000000000001011)))
+                                          (SYN_REPLY . 2)
+                                          (RST_STREAM . 3)
+                                          (SETTINGS . 4)
+                                          (NOOP . 5)
+                                          (PING . 6)
+                                          (GOAWAY . 7)
+                                          (HEADERS . 8)
+                                          (WINDOW_UPDATE . 9)
+                                          (CREDENTIAL . #b0000000000001011)))
 
 (defparameter *rst-stream-status-code* '((PROTOCOL_ERROR . 1)
                                    (INVALID_STREAM . 2)
@@ -75,6 +75,77 @@
 
 (defmethod frame-serialization (frame)
   nil)
+
+(defun frame-deserialize (stream)
+  (let ((first-ub32 (loop with value = 0
+                          with count = 0
+                          for item in (reverse (loop repeat 4 collect (read-byte stream))) do
+                          (progn
+                            (setf value (logior value (ash item count)))
+                            (incf count 8))
+                          finally (return value))))
+    (if (= 1 (ldb (byte 1 31) first-ub32))
+        (let ((frame (mk-control-frame))
+              (second-ub32 (loop with value = 0
+                                 with count = 0
+                                 for item in (reverse (loop repeat 4 collect (read-byte stream)))
+                                 do (progn
+                                      (setf value (logior value (ash item count)))
+                                      (incf count 8))
+                                 finally (return value))))
+          (with-slots (version flags frame-type length-in-byte control-frame-data) frame
+            (setf version (ldb (byte 15 16) first-ub32))
+            (setf frame-type (car (rassoc (ldb (byte 16 0) first-ub32) *control-frame-type-code*)))
+            (setf length-in-byte (ldb (byte 24 0) second-ub32))
+            (setf flags (ldb (byte 8 24) second-ub32))
+            (setf control-frame-data (mk-control-frame-data stream frame-type)))
+          frame)
+      (let ((frame (mk-data-frame))
+            (secode-ub32 (loop with value = 0
+                               with count = 0
+                               for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+                               do (progn
+                                    (setf value (logior value (ash item count)))
+                                    (incf count 8))
+                               finally (return value))))
+        (with-slots (stream-id flags length-in-byte data) frame
+          (setf stream-id (ldb (byte 31 0) first-ub32))
+          (setf flags (ldb (byte 8 24) secode-ub32))
+          (setf length-in-byte (ldb (byte 24 0) secode-ub32) secode-ub32)
+          (setf data (loop with array = (make-array length-in-byte :fill-pointer 0)
+                           repeat length-in-byte 
+                           do (vector-push (read-byte stream) array)
+                           finally (return array))))
+        frame))))
+
+(defun nv-deserialize (stream count-of-nv-pair)
+  (loop with retval = nil
+        repeat count-of-nv-pair
+        do (let* ((name-len (loop with value = 0
+                                  with count = 0
+                                  for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+                                  do (progn
+                                       (setf value (logior value (ash item count)))
+                                       (incf count 8))
+                                  finally (return value)))
+                  (name (loop with retval = (make-array name-len :element-type 'character :fill-pointer 0)
+                              repeat name-len
+                              do (vector-push (code-char (read-byte stream)))
+                              finally (return retval)))
+                  (value-len (loop with value = 0
+                                   with count = 0
+                                   for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+                                   do (progn
+                                        (setf value (logior value (ash item count)))
+                                        (incf count 8))
+                                   finally (return value)))
+                  (value (loop with retval = (make-array name-len :element-type 'character :fill-pointer 0)
+                               repeat name-len
+                               do (vector-push (code-char (read-byte stream)))
+                               finally (return retval))))
+             (setf retval (append retval (list (cons name value)))))
+        finally (return retval)))
+
 ;;====================================================================================================
 (defclass control-frame ()
   ((version :initform 3
@@ -110,6 +181,7 @@
                                 (cons (logior (ash 1 15) (ldb (byte 15 0) version)) 16))))
       (append-vector (number-to-vector 8 value)
                      (frame-serialization control-frame-data)))))
+
 ;;====================================================================================================
 
 (defun name-value-pair-to-list (nv-pair)
@@ -156,6 +228,8 @@
                       :frame-type 'HEADERS
                       :control-frame-data frame-data
                       :length-in-byte (length (frame-serialization frame-data)))))
+(defmethod mk-control-frame-data (stream (frame-type (eql 'HEADERS)))
+  (mk-header-control-frame-data 20))
 
 (defmethod frame-serialization ((frame header-control-frame-data))
   (with-slots (stream-id  name-value-pair) frame
@@ -186,6 +260,8 @@
                                          stream-id
                                          :status-code status-code)))
 
+(defmethod mk-control-frame-data (stream (frame-type (eql 'RST_STREAM)))
+  (mk-rst-stream-control-frame-data 20))
 
 (defmethod frame-serialization ((frame rst-stream-control-frame-data))
   (with-slots (stream-id  status-code) frame
@@ -215,6 +291,8 @@
                       :frame-type 'SYN_REPLY
                       :control-frame-data frame-data
                       :length-in-byte (length (frame-serialization frame-data)))))
+(defmethod mk-control-frame-data (stream (frame-type (eql 'SYN_REPLY)))
+  (mk-syn-reply-control-frame-data 20))
 
 (defmethod frame-serialization ((frame syn-reply-control-frame-data))
   (with-slots (stream-id name-value-pair) frame
@@ -269,6 +347,39 @@
                       :control-frame-data frame-data
                       :length-in-byte (length (frame-serialization frame-data)))))
 
+
+
+(defmethod mk-control-frame-data (stream (frame-type (eql 'SYN_STREAM)))
+  (let* ((stream-id (loop with value = 0
+                         with count = 0
+                         for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+                         do (progn
+                              (setf value (logior value (ash item count)))
+                              (incf count 8))
+                         finally (return value)))
+        (associated-to-stream-id (loop with value = 0
+                                       with count = 0
+                                       for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+                                       do (progn
+                                            (setf value (logior value (ash item count)))
+                                            (incf count 8))
+                                       finally (return value)))
+        (priority (ash (read-byte stream) -5))
+        (slot (read-byte stream))
+        (count-of-nv-pair (loop with value = 0
+                                with count = 0
+                                for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+                                do (progn
+                                     (setf value (logior value (ash item count)))
+                                     (incf count 8))
+                                finally (return value)))
+        (nv-pair (nv-deserialize stream count-of-nv-pair)))
+    (mk-syn-stream-control-frame stream-id priority 
+                                 :associated-to-stream-id associated-to-stream-id
+                                 :slot slot
+                                 :name-value-pair name-value-pair)))
+    
+
 (defmethod frame-serialization ((frame syn-stream-control-frame-data))
   (with-slots (stream-id priority associated-to-stream-id name-value-pair slot) frame
     (let ((value (serialization (cons (length name-value-pair) 32)
@@ -300,6 +411,9 @@
    :control-frame-data (mk-goway-control-frame-data last-good-stream-id 
                                                     :status-code status-code)))
 
+(defmethod mk-control-frame-data (stream (frame-type (eql 'GOAWAY)))
+  (mk-goway-control-frame-data 20))
+
 (defmethod frame-serialization ((frame goway-control-frame-data))
   (with-slots (last-good-stream-id status-code) frame
     (let ((value (serialization (cons (goaway-frame-flag-to-code status-code) 32)
@@ -320,6 +434,8 @@
                     :length-in-byte 4
                     :frame-type 'PING
                     :control-frame-data (mk-ping-control-frame-data id)))
+(defmethod mk-control-frame-data (stream (frame-type (eql 'PING)))
+  (mk-ping-control-frame-data 20))
 
 (defmethod frame-serialization ((frame ping-control-frame-data))
   (number-to-vector 4 (id frame)))
@@ -345,6 +461,9 @@
    :control-frame-data (mk-window-update-control-frame-data stream-id
                                                             delta-window-size)))
 
+(defmethod mk-control-frame-data (stream (frame-type (eql 'WINDOW_UPDATE)))
+  (mk-window-update-control-frame-data 20 20))
+
 (defmethod frame-serialization ((frame window-update-control-frame-data))
   (with-slots (stream-id delta-window-size) frame
     (let ((value (serialization (cons (ldb (byte 31 0) delta-window-size) 32)
@@ -368,6 +487,8 @@
      :length-in-byte (length (frame-serialization frame-data))
      :frame-type 'SETTINGS
      :control-frame-data frame-data)))
+(defmethod mk-control-frame-data (stream (frame-type (eql 'SETTINGS)))
+  (mk-setting-control-frame-data nil))
 
 (defun comprised-flag-and-id (flag id)
   (logior (ash (ldb (byte 8 0) flag) 24) 
@@ -400,6 +521,8 @@
                  :proof proof
                  :length-certificate-pair length-certificate-pair))
 
+(defmethod mk-control-frame-data (stream (frame-type (eql 'CREDENTIAL)))
+  (mk-credential-control-frame-data 20 20 20))
 
 (defmethod frame-serialization ((frame credential-control-frame-data))
   (with-slots (slots proof-length proof length-certificate-pair) frame
