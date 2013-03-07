@@ -115,26 +115,14 @@
 (defun nv-deserialize (stream count-of-nv-pair)
   (loop with retval = nil
         repeat count-of-nv-pair
-        do (let* ((name-len (loop with value = 0
-                                  with count = 0
-                                  for item in (reverse (loop repeat 4 collect (read-byte stream))) 
-                                  do (progn
-                                       (setf value (logior value (ash item count)))
-                                       (incf count 8))
-                                  finally (return value)))
+        do (let* ((name-len (read-32bit-integer stream))
                   (name (loop with retval = (make-array name-len 
                                                         :element-type 'character 
                                                         :fill-pointer 0)
                               repeat name-len
                               do (vector-push (code-char (read-byte stream)) retval)
                               finally (return retval)))
-                  (value-len (loop with value = 0
-                                   with count = 0
-                                   for item in (reverse (loop repeat 4 collect (read-byte stream))) 
-                                   do (progn
-                                        (setf value (logior value (ash item count)))
-                                        (incf count 8))
-                                   finally (return value)))
+                  (value-len (read-32bit-integer stream))
                   (value (loop with retval = (make-array name-len 
                                                          :element-type 'character 
                                                          :fill-pointer 0)
