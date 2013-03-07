@@ -147,20 +147,8 @@
 (defun iv-deserialize (stream count-of-nv-pair)
   (loop with retval = nil
         repeat count-of-nv-pair
-        do (let* ((id (loop with value = 0
-                                  with count = 0
-                                  for item in (reverse (loop repeat 4 collect (read-byte stream))) 
-                                  do (progn
-                                       (setf value (logior value (ash item count)))
-                                       (incf count 8))
-                                  finally (return value)))
-                  (value (loop with value = 0
-                                  with count = 0
-                                  for item in (reverse (loop repeat 4 collect (read-byte stream))) 
-                                  do (progn
-                                       (setf value (logior value (ash item count)))
-                                       (incf count 8))
-                                  finally (return value))))
+        do (let* ((id (read-32bit-integer stream))
+                  (value (read-32bit-integer stream)))
              (setf retval (append retval (list (cons id value)))))
         finally (return retval)))
 
