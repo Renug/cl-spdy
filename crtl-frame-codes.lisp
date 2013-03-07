@@ -86,13 +86,7 @@
                           finally (return value))))
     (if (= 1 (ldb (byte 1 31) first-ub32))
         (let ((frame (mk-control-frame))
-              (second-ub32 (loop with value = 0
-                                 with count = 0
-                                 for item in (reverse (loop repeat 4 collect (read-byte stream)))
-                                 do (progn
-                                      (setf value (logior value (ash item count)))
-                                      (incf count 8))
-                                 finally (return value))))
+              (second-ub32 (read-32bit-integer stream)))
           (with-slots (version flags frame-type length-in-byte control-frame-data) frame
             (setf version (ldb (byte 15 16) first-ub32))
             (setf frame-type (car (rassoc (ldb (byte 16 0) first-ub32) *control-frame-type-code*)))
@@ -107,13 +101,7 @@
               (setf control-frame-data (mk-control-frame-data data-stream frame-type))))
           frame))
       (let ((frame (mk-data-frame))
-            (secode-ub32 (loop with value = 0
-                               with count = 0
-                               for item in (reverse (loop repeat 4 collect (read-byte stream))) 
-                               do (progn
-                                    (setf value (logior value (ash item count)))
-                                    (incf count 8))
-                               finally (return value))))
+            (secode-ub32 (read-32bit-integer stream)))
         (with-slots (stream-id flags length-in-byte data) frame
           (setf stream-id (ldb (byte 31 0) first-ub32))
           (setf flags (ldb (byte 8 24) secode-ub32))
@@ -175,6 +163,16 @@
                                   finally (return value))))
              (setf retval (append retval (list (cons id value)))))
         finally (return retval)))
+
+(defun read-32bit-integer (stream)
+  (loop with value = 0
+        with count = 0
+        for item in (reverse (loop repeat 4 collect (read-byte stream))) 
+        do (progn
+             (setf value (logior value (ash item count)))
+             (incf count 8))
+        finally (return value)))
+
 ;;====================================================================================================
 (defclass control-frame ()
   ((version :initform 3
@@ -330,14 +328,6 @@
                       :frame-type 'SYN_REPLY
                       :control-frame-data frame-data
                       :length-in-byte (length (frame-serialization frame-data)))))
-(defun read-32bit-integer (stream)
-  (loop with value = 0
-        with count = 0
-        for item in (reverse (loop repeat 4 collect (read-byte stream))) 
-        do (progn
-             (setf value (logior value (ash item count)))
-             (incf count 8))
-        finally (return value)))
 
 (defmethod mk-control-frame-data (stream (frame-type (eql 'SYN_REPLY)))
   (let* ((stream-id (read-32bit-integer stream))
