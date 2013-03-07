@@ -194,7 +194,11 @@
                        :initarg :control-frame-data
                        :accessor control-frame-data)))
 
-(defun mk-control-frame (&key (flags 'FLAG_FIN) (frame-type ) length-in-byte (version 3) (control-frame-data nil))
+(defun mk-control-frame (&key (flags 'FLAG_FIN) 
+                              (frame-type ) 
+                              length-in-byte 
+                              (version 3) 
+                              (control-frame-data nil))
   (make-instance 'control-frame
                  :version version
                  :flags flags
