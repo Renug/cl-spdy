@@ -134,9 +134,11 @@
                                        (setf value (logior value (ash item count)))
                                        (incf count 8))
                                   finally (return value)))
-                  (name (loop with retval = (make-array name-len :element-type 'character :fill-pointer 0)
+                  (name (loop with retval = (make-array name-len 
+                                                        :element-type 'character 
+                                                        :fill-pointer 0)
                               repeat name-len
-                              do (vector-push (code-char (read-byte stream)))
+                              do (vector-push (code-char (read-byte stream)) retval)
                               finally (return retval)))
                   (value-len (loop with value = 0
                                    with count = 0
@@ -145,9 +147,11 @@
                                         (setf value (logior value (ash item count)))
                                         (incf count 8))
                                    finally (return value)))
-                  (value (loop with retval = (make-array name-len :element-type 'character :fill-pointer 0)
+                  (value (loop with retval = (make-array name-len 
+                                                         :element-type 'character 
+                                                         :fill-pointer 0)
                                repeat name-len
-                               do (vector-push (code-char (read-byte stream)))
+                               do (vector-push (code-char (read-byte stream)) retval)
                                finally (return retval))))
              (setf retval (append retval (list (cons name value)))))
         finally (return retval)))
