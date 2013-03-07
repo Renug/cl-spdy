@@ -24,22 +24,22 @@
                                    (FRAME_TOO_LARGE . 11)))
 
 (defparameter *goway-status-code* '((OK . 0)
-                              (PROTOCOL_ERROR . 1)
-                              (INTERNAL_ERROR . 11)))
+                                    (PROTOCOL_ERROR . 1)
+                                    (INTERNAL_ERROR . 11)))
 
 (defparameter *setting-flag-code* '((FLAG_SETTINGS_CLEAR_SETTINGS . #x1)))
 
 (defparameter *setting-id-flag-code* '((FLAG_SETTINGS_PERSIST_VALUE . #x1)
-                                 (FLAG_SETTINGS_PERSISTED . #x2)))
+                                       (FLAG_SETTINGS_PERSISTED . #x2)))
 
 (defparameter *setting-id-code* '((SETTINGS_UPLOAD_BANDWIDTH . 1)
-                            (SETTINGS_DOWNLOAD_BANDWIDTH . 2)
-                            (SETTINGS_ROUND_TRIP_TIME . 3)
-                            (SETTINGS_MAX_CONCURRENT_STREAMS . 4)
-                            (SETTINGS_CURRENT_CWND . 5)
-                            (SETTINGS_DOWNLOAD_RETRANS_RATE . 6)
-                            (SETTINGS_INITIAL_WINDOW_SIZE . 7)
-                            (SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE . 8)))
+                                  (SETTINGS_DOWNLOAD_BANDWIDTH . 2)
+                                  (SETTINGS_ROUND_TRIP_TIME . 3)
+                                  (SETTINGS_MAX_CONCURRENT_STREAMS . 4)
+                                  (SETTINGS_CURRENT_CWND . 5)
+                                  (SETTINGS_DOWNLOAD_RETRANS_RATE . 6)
+                                  (SETTINGS_INITIAL_WINDOW_SIZE . 7)
+                                  (SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE . 8)))
 
 (defparameter *control-frame-flag-code* '((FLAG_FIN . #x01)
                                           (FLAG_SETTINGS_CLEAR_SETTINGS . #x1)
@@ -77,13 +77,7 @@
   nil)
 
 (defun frame-deserialize (stream)
-  (let ((first-ub32 (loop with value = 0
-                          with count = 0
-                          for item in (reverse (loop repeat 4 collect (read-byte stream))) do
-                          (progn
-                            (setf value (logior value (ash item count)))
-                            (incf count 8))
-                          finally (return value))))
+  (let ((first-ub32 (read-32bit-integer stream)))
     (if (= 1 (ldb (byte 1 31) first-ub32))
         (let ((frame (mk-control-frame))
               (second-ub32 (read-32bit-integer stream)))
